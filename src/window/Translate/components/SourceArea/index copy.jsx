@@ -177,9 +177,6 @@ export default function SourceArea(props) {
         if (event.key === 'Escape') {
             appWindow.close();
         }
-        if (event.key === ' ') {
-            handleKeyDown(event);
-        }
     };
 
     const handleSpeak = async () => {
@@ -367,19 +364,21 @@ export default function SourceArea(props) {
         });
     }, [textAreaRef]);
 
-    const handleKeyDown = (event) => {
-        if (event.key === ' ') {
+    const handleKeyDown = (e) => {
+        if (e.key === ' ') {
             const currentTime = Date.now();
             
             if (currentTime - lastSpaceTime < 500) {
                 setSpaceCount(prev => prev + 1);
                 
                 if (spaceCount === 2) {
-                    event.preventDefault();
-                    detect_language(sourceText).then(() => {
-                        syncSourceText();
-                    });
+                    e.preventDefault();
                     setSpaceCount(0);
+                    
+                    const text = e.target.value.trim();
+                    if (text) {
+                        syncSourceText();
+                    }
                 }
             } else {
                 setSpaceCount(1);
@@ -403,7 +402,7 @@ export default function SourceArea(props) {
                         ref={textAreaRef}
                         className={`text-[${appFontSize}px] bg-content1 h-full resize-none outline-none`}
                         value={sourceText}
-                        onKeyDown={keyDown}
+                        onKeyDown={handleKeyDown}
                         onChange={(e) => {
                             const v = e.target.value;
                             changeSourceText(v);
