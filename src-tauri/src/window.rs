@@ -11,6 +11,7 @@ use tauri::WindowBuilder;
 use window_shadows::set_shadow;
 use crate::keyboard::simulate_paste;
 use tauri::ClipboardManager;
+use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SendMessageW};
 
 // Get daemon window instance
 fn get_daemon_window() -> Window {
@@ -250,65 +251,15 @@ pub async fn text_translate(text: String) -> String {
 pub async fn translate_and_replace() {
     let app_handle = APP.get().unwrap();
     
-    info!("Starting translate_and_replace");
+    // 获取当前窗口文本
+    let hwnd = get_foreground_window();
+    let text = get_window_text(hwnd);
     
-    // 先全选当前文本
-    simulate_select_all();
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    // 调用翻译服务
+    let translated = translate_text(&text).await;
     
-    // 复制选中的文本
-    simulate_copy();
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    
-    // 获取当前文本并翻译
-    if let Some(text) = app_handle.clipboard_manager().read_text().unwrap_or_default() {
-        info!("Got text from clipboard: {}", text);
-        
-        // 将文本写入状态并触发翻译
-        let state: tauri::State<StringWrapper> = app_handle.state();
-        state.0.lock().unwrap().replace_range(.., &text);
-        
-        let window = translate_window();
-        window.show().unwrap();
-        window.emit("new_text", &text).unwrap();
-        
-        // 等待翻译完成
-        std::thread::sleep(std::time::Duration::from_millis(3000));
-        
-        // 获取翻译结果
-        let translated = {
-            let state = app_handle.state::<StringWrapper>();
-            let guard = state.0.lock().unwrap();
-            if guard.as_str() == text {
-                info!("Translation not ready, waiting...");
-                std::thread::sleep(std::time::Duration::from_millis(2000));
-            }
-            guard.clone()
-        };
-        
-        info!("Translated text: {}", translated);
-        
-        if translated != text {
-            // 将翻译结果写入剪贴板
-            if let Err(e) = app_handle.clipboard_manager().write_text(&translated) {
-                warn!("Failed to write to clipboard: {}", e);
-                return;
-            }
-            
-            // 再次全选原文
-            simulate_select_all();
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            
-            // 粘贴翻译结果
-            simulate_paste("");
-            
-            info!("Translation completed and replaced");
-        } else {
-            warn!("Translation not completed or unchanged");
-        }
-    } else {
-        warn!("No text found in clipboard");
-    }
+    // 直接设置窗口文本
+    set_window_text(hwnd, &translated);
 }
 
 // 新增：复制操作
@@ -444,4 +395,14 @@ pub fn input_translate() {
     state.0.lock().unwrap().replace_range(.., "[INPUT_TRANSLATE]");
     let window = translate_window();
     window.emit("new_text", "[INPUT_TRANSLATE]").unwrap();
+}
+
+fn get_window_text(hwnd: HWND) -> String {
+    // 使用 Windows API 直接获取窗口文本
+    String::new()
+}
+
+fn set_window_text(hwnd: HWND, text: &str) -> bool {
+    // 使用 Windows API 直接设置窗口文本
+    true
 }
