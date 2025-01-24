@@ -167,7 +167,7 @@ export default function SourceArea(props) {
         }
     };
 
-    const keyDown = (event) => {
+    const handleKeyDown = (event) => {
         if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
             detect_language(sourceText).then(() => {
@@ -178,7 +178,24 @@ export default function SourceArea(props) {
             appWindow.close();
         }
         if (event.key === ' ') {
-            handleKeyDown(event);
+            const currentTime = Date.now();
+            
+            if (currentTime - lastSpaceTime < 500) {
+                setSpaceCount(prev => prev + 1);
+                
+                if (spaceCount === 2) {
+                    event.preventDefault();
+                    detect_language(sourceText).then(() => {
+                        syncSourceText();
+                    });
+                    setSpaceCount(0);
+                }
+            } else {
+                setSpaceCount(1);
+            }
+            setLastSpaceTime(currentTime);
+        } else {
+            setSpaceCount(0);
         }
     };
 
@@ -367,29 +384,6 @@ export default function SourceArea(props) {
         });
     }, [textAreaRef]);
 
-    const handleKeyDown = (event) => {
-        if (event.key === ' ') {
-            const currentTime = Date.now();
-            
-            if (currentTime - lastSpaceTime < 500) {
-                setSpaceCount(prev => prev + 1);
-                
-                if (spaceCount === 2) {
-                    event.preventDefault();
-                    detect_language(sourceText).then(() => {
-                        syncSourceText();
-                    });
-                    setSpaceCount(0);
-                }
-            } else {
-                setSpaceCount(1);
-            }
-            setLastSpaceTime(currentTime);
-        } else {
-            setSpaceCount(0);
-        }
-    };
-
     return (
         <div className={hideSource && windowType !== '[INPUT_TRANSLATE]' && 'hidden'}>
             <Card
@@ -403,7 +397,7 @@ export default function SourceArea(props) {
                         ref={textAreaRef}
                         className={`text-[${appFontSize}px] bg-content1 h-full resize-none outline-none`}
                         value={sourceText}
-                        onKeyDown={keyDown}
+                        onKeyDown={handleKeyDown}
                         onChange={(e) => {
                             const v = e.target.value;
                             changeSourceText(v);
