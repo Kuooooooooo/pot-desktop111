@@ -14,6 +14,7 @@ mod system_ocr;
 mod tray;
 mod updater;
 mod window;
+mod keyboard;
 
 use backup::*;
 use clipboard::*;
@@ -29,11 +30,15 @@ use std::sync::Mutex;
 use system_ocr::*;
 use tauri::api::notification::Notification;
 use tauri::Manager;
+use tauri::AppHandle;
 use tauri_plugin_log::LogTarget;
 use tray::*;
 use updater::check_update;
 use window::config_window;
 use window::updater_window;
+use tauri::GlobalShortcutManager;
+use window::text_translate;
+use window::translate_and_replace;
 
 // Global AppHandle
 pub static APP: OnceCell<tauri::AppHandle> = OnceCell::new();
@@ -125,6 +130,16 @@ fn main() {
                 clipboard_monitor.to_string(),
             )));
             start_clipboard_monitor(app.handle());
+            // 注册默认翻译快捷键
+            if let Err(e) = app.global_shortcut_manager().register("CommandOrControl+Alt+T", move || {
+                if let Ok(text) = get_selected_text() {
+                    if !text.is_empty() {
+                        text_translate(text);
+                    }
+                }
+            }) {
+                info!("Failed to register translate shortcut: {}", e);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -147,7 +162,8 @@ fn main() {
             local,
             install_plugin,
             font_list,
-            aliyun
+            aliyun,
+            register_translate_shortcut
         ])
         .on_system_tray_event(tray_event_handler)
         .build(tauri::generate_context!())
@@ -158,4 +174,36 @@ fn main() {
                 api.prevent_exit();
             }
         });
+}
+
+#[tauri::command]
+async fn register_translate_shortcut(app: AppHandle, shortcut: String) -> Result<(), String> {
+    let _ = app.global_shortcut_manager().unregister_all();
+    
+    app.global_shortcut_manager()
+        .register(&shortcut, move || {
+            tauri::async_runtime::spawn(async move {
+                translate_and_replace().await;
+            });
+        })
+        .map_err(|e| e.to_string())
+}
+
+// 获取选中文本的函数
+fn get_selected_text() -> Result<String, Box<dyn std::error::Error>> {
+    #[cfg(target_os = "windows")]
+    {
+        use clipboard::get_selected_text as win_get_selected_text;
+        win_get_selected_text()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use clipboard::get_selected_text as mac_get_selected_text;
+        mac_get_selected_text()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use clipboard::get_selected_text as linux_get_selected_text;
+        linux_get_selected_text()
+    }
 }

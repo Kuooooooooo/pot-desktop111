@@ -31,3 +31,26 @@ pub fn start_clipboard_monitor(app_handle: tauri::AppHandle) {
         }
     });
 }
+
+#[cfg(target_os = "windows")]
+pub fn get_selected_text() -> Result<String, Box<dyn std::error::Error>> {
+    use arboard::Clipboard;
+    let mut clipboard = Clipboard::new()?;
+    clipboard.get_text().map_err(|e| e.into())
+}
+
+#[cfg(target_os = "macos")]
+pub fn get_selected_text() -> Result<String, Box<dyn std::error::Error>> {
+    // macOS 实现
+    use arboard::Clipboard;
+    let mut clipboard = Clipboard::new()?;
+    Ok(clipboard.get_text()?)
+}
+
+#[cfg(target_os = "linux")]
+pub fn get_selected_text() -> Result<String, Box<dyn std::error::Error>> {
+    // Linux 实现
+    use arboard::Clipboard;
+    let mut clipboard = Clipboard::new()?;
+    Ok(clipboard.get_text()?)
+}

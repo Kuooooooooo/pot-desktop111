@@ -4651,6 +4651,7 @@ version = "0.0.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
+ "core-graphics 0.22.3",
  "dirs 5.0.1",
  "font-kit",
  "image 0.25.4",
@@ -4678,6 +4679,7 @@ dependencies = [
  "walkdir",
  "window-shadows",
  "windows 0.58.0",
+ "x11",
  "zip",
 ]
 
