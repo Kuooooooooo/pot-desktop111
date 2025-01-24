@@ -281,101 +281,43 @@ class DingTalkHandler(WindowHandler):
 class WeChatHandler(WindowHandler):
     """微信窗口处理器"""
     def can_handle(self, hwnd: int, class_name: str) -> bool:
-        return "WeChatMainWndForPC" in class_name
+        return "WeChatMainWndForPC" in class_name or "ChatWnd" in class_name
         
     def get_text(self, hwnd: int) -> str:
         try:
-            # 检查窗口是否是微信主窗口
-            if not win32gui.IsWindow(hwnd):
-                print("无效的微信窗口")
-                return ""
+            # 查找微信编辑框
+            edit_hwnd = None
+            def find_edit(child_hwnd, param):
+                nonlocal edit_hwnd
+                class_name = win32gui.GetClassName(child_hwnd)
+                if "RICHEDIT50W" in class_name or "Edit" in class_name:
+                    edit_hwnd = child_hwnd
+                    return False
+                return True
                 
-            # 检查窗口是否可见
-            if not win32gui.IsWindowVisible(hwnd):
-                print("微信窗口不可见")
-                return ""
-                
-            # 检查窗口是否被最小化
-            if win32gui.IsIconic(hwnd):
-                print("微信窗口被最小化")
-                return ""
-                
-            # 先保存剪贴板内容
-            original = None
-            try:
-                win32clipboard.OpenClipboard()
+            win32gui.EnumChildWindows(hwnd, find_edit, None)
+            
+            if edit_hwnd:
+                # 先尝试直接获取文本
                 try:
-                    original = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
-                except:
-                    pass
-                win32clipboard.EmptyClipboard()
-                win32clipboard.CloseClipboard()
-            except:
-                try:
-                    win32clipboard.CloseClipboard()
+                    length = win32gui.SendMessage(edit_hwnd, win32con.WM_GETTEXTLENGTH, 0, 0)
+                    if length > 0:
+                        buffer = win32gui.PyMakeBuffer(length + 1)
+                        win32gui.SendMessage(edit_hwnd, win32con.WM_GETTEXT, length + 1, buffer)
+                        text = buffer[:length].tobytes().decode('utf-16')
+                        if text and text.strip():
+                            print(f"直接获取到文本: {text}")
+                            return text
                 except:
                     pass
                     
-            try:
-                # 激活窗口
-                win32gui.SetForegroundWindow(hwnd)
-                time.sleep(0.3)
-                
-                # 模拟Ctrl+A
-                win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
-                win32api.keybd_event(ord('A'), 0, 0, 0)
-                time.sleep(0.2)
-                win32api.keybd_event(ord('A'), 0, win32con.KEYEVENTF_KEYUP, 0)
-                win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
-                
-                # 模拟Ctrl+C
-                win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
-                win32api.keybd_event(ord('C'), 0, 0, 0)
-                time.sleep(0.2)
-                win32api.keybd_event(ord('C'), 0, win32con.KEYEVENTF_KEYUP, 0)
-                win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
-                time.sleep(0.3)
-                
-                # 获取文本
-                text = ""
-                try:
-                    win32clipboard.OpenClipboard()
-                    try:
-                        text = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
-                    except:
-                        pass
-                    win32clipboard.EmptyClipboard()
-                finally:
-                    try:
-                        win32clipboard.CloseClipboard()
-                    except:
-                        pass
-                        
-                # 恢复原始剪贴板
-                if original:
-                    try:
-                        win32clipboard.OpenClipboard()
-                        win32clipboard.EmptyClipboard()
-                        win32clipboard.SetClipboardText(original, win32con.CF_UNICODETEXT)
-                        win32clipboard.CloseClipboard()
-                    except:
-                        try:
-                            win32clipboard.CloseClipboard()
-                        except:
-                            pass
-                            
-                if text and text.strip():
-                    print(f"获取到微信文本: {text}")
-                    return text
-                    
-            except Exception as e:
-                print(f"微信操作错误: {e}")
-                
-            return ""
+            # 如果直接获取失败，使用剪贴板方法
+            print("直接获取失败，尝试剪贴板方法")
+            return self.get_text_by_clipboard(hwnd)
             
         except Exception as e:
             print(f"微信获取文本错误: {e}")
-            return ""
+            return self.get_text_by_clipboard(hwnd)
 
     def set_text(self, hwnd: int, text: str) -> bool:
         try:
@@ -435,50 +377,74 @@ class WeChatHandler(WindowHandler):
                     pass
             return False
 
-class ChromeHandler(WindowHandler):
-    """Chrome/Vivaldi窗口处理器"""
+class WordHandler(WindowHandler):
+    """Microsoft Word 处理器"""
     def can_handle(self, hwnd: int, class_name: str) -> bool:
-        return "Chrome_WidgetWin_1" in class_name
+        return "OpusApp" in class_name
         
     def get_text(self, hwnd: int) -> str:
         try:
-            # 先尝试使用UI Automation
-            import uiautomation as auto
-            element = auto.ControlFromHandle(hwnd)
-            if element:
-                text = element.GetValuePattern().Value
-                if text and text.strip():
-                    print(f"通过UI Automation获取到文本: {text}")
-                    return text
-                    
-            # 如果失败，尝试使用剪贴板方法
-            print("UI Automation失败，尝试剪贴板方法")
-            return self.get_text_by_clipboard(hwnd)
-            
-        except Exception as e:
-            print(f"Chrome获取文本错误: {e}")
-            return self.get_text_by_clipboard(hwnd)
-
-    def set_text(self, hwnd: int, text: str) -> bool:
-        try:
-            # 先尝试使用UI Automation
+            # 尝试使用 UI Automation
             import uiautomation as auto
             element = auto.ControlFromHandle(hwnd)
             if element:
                 try:
-                    element.GetValuePattern().SetValue(text)
-                    print("通过UI Automation设置文本成功")
-                    return True
+                    # 查找文档内容元素
+                    doc = element.DocumentControl()
+                    if doc:
+                        text = doc.GetSelectionText()
+                        if text and text.strip():
+                            print(f"通过UI Automation获取到Word文本: {text}")
+                            return text
                 except:
-                    print("UI Automation设置失败")
+                    pass
                     
-            # 如果失败，使用剪贴板方法
-            print("尝试使用剪贴板方法")
-            return self.set_text_by_clipboard(hwnd, text)
+            # 如果UI Automation失败，使用剪贴板方法
+            return self.get_text_by_clipboard(hwnd)
             
         except Exception as e:
-            print(f"Chrome设置文本错误: {e}")
-            return self.set_text_by_clipboard(hwnd, text)
+            print(f"Word获取文本错误: {e}")
+            return self.get_text_by_clipboard(hwnd)
+            
+    def set_text(self, hwnd: int, text: str) -> bool:
+        return self.set_text_by_clipboard(hwnd, text)
+
+class ChromeHandler(WindowHandler):
+    """Chrome/Edge/Vivaldi等基于Chromium的浏览器处理器"""
+    def can_handle(self, hwnd: int, class_name: str) -> bool:
+        return any(cls in class_name for cls in [
+            "Chrome_WidgetWin_",  # Chrome/Vivaldi
+            "Chrome_RenderWidgetHostHWND",  # Chrome渲染窗口
+            "MozillaWindowClass",  # Firefox
+            "EdgeWindow"  # Edge
+        ])
+        
+    def get_text(self, hwnd: int) -> str:
+        try:
+            # 尝试使用 UI Automation
+            import uiautomation as auto
+            element = auto.ControlFromHandle(hwnd)
+            if element:
+                try:
+                    # 查找文本框元素
+                    edit = element.EditControl()
+                    if edit:
+                        text = edit.GetValuePattern().Value
+                        if text and text.strip():
+                            print(f"通过UI Automation获取到浏览器文本: {text}")
+                            return text
+                except:
+                    pass
+                    
+            # 如果UI Automation失败，使用剪贴板方法
+            return self.get_text_by_clipboard(hwnd)
+            
+        except Exception as e:
+            print(f"浏览器获取文本错误: {e}")
+            return self.get_text_by_clipboard(hwnd)
+            
+    def set_text(self, hwnd: int, text: str) -> bool:
+        return self.set_text_by_clipboard(hwnd, text)
 
 class FirefoxHandler(WindowHandler):
     """Firefox窗口处理器"""
@@ -503,32 +469,58 @@ class FirefoxHandler(WindowHandler):
         return super().get_text(hwnd)
 
 class DefaultHandler(WindowHandler):
-    """默认窗口处理器"""
+    """默认处理器，处理未知类型的窗口"""
     def can_handle(self, hwnd: int, class_name: str) -> bool:
-        return True
+        return True  # 作为最后的后备处理器
+        
+    def get_text(self, hwnd: int) -> str:
+        # 尝试多种方法获取文本
+        try:
+            # 1. 尝试直接获取窗口文本
+            text = win32gui.GetWindowText(hwnd)
+            if text and text.strip():
+                return text
+                
+            # 2. 尝试获取焦点控件文本
+            focused = win32gui.GetFocus()
+            if focused:
+                text = win32gui.GetWindowText(focused)
+                if text and text.strip():
+                    return text
+                    
+            # 3. 使用剪贴板方法
+            return self.get_text_by_clipboard(hwnd)
+            
+        except Exception as e:
+            print(f"默认处理器获取文本错误: {e}")
+            return self.get_text_by_clipboard(hwnd)
+            
+    def set_text(self, hwnd: int, text: str) -> bool:
+        return self.set_text_by_clipboard(hwnd, text)
 
 class SimpleTranslator:
     def __init__(self):
         """初始化翻译器"""
         self.shift_pressed = False
-        self.f11_pressed = False     # 使用 Shift+F11 翻译
-        self.f12_pressed = False     # 使用 Shift+F12 退出
-        self.last_translation_time = 0
+        self.f11_pressed = False
+        self.f12_pressed = False
+        self.last_translation_time = time.time()  # 记录最后一次翻译时间
+        self.min_interval = 1.0  # 最小翻译间隔（秒）
         self.keyboard = Controller()
         print("✓ 翻译器初始化完成")
         print("等待快捷键触发:")
         print("- Shift+F11: 翻译")
         print("- Shift+F12: 退出程序")
         
-        # 注册窗口处理器
+        # 注册窗口处理器（按优先级排序）
         self.handlers = [
-            NotepadHandler(),  # 记事本处理器放在最前面
-            QQHandler(),
-            DingTalkHandler(),
-            WeChatHandler(),
-            ChromeHandler(),
-            FirefoxHandler(),
-            DefaultHandler()
+            WordHandler(),        # Microsoft Word
+            NotepadHandler(),     # 记事本
+            WeChatHandler(),      # 微信
+            QQHandler(),          # QQ
+            DingTalkHandler(),    # 钉钉
+            ChromeHandler(),      # 浏览器
+            DefaultHandler()      # 默认处理器
         ]
 
     def get_window_class(self, hwnd) -> str:
@@ -753,6 +745,15 @@ class SimpleTranslator:
                 print("未获取到文本")
                 return
 
+            # 检查文本是否与上次相同（考虑窗口类型）
+            last_key = f"{class_name}:{text}"
+            if hasattr(self, 'last_text') and self.last_text == last_key:
+                print("文本未变化，跳过翻译")
+                return
+                
+            # 更新最后处理的文本（带窗口类型）
+            self.last_text = last_key
+
             print(f"原文: {text}")
             
             # 检查是否是英文
@@ -815,10 +816,18 @@ class SimpleTranslator:
             elif key == keyboard.Key.f12:
                 self.f12_pressed = True
 
-            # 检查组合键
+            current_time = time.time()
+            # 检查组合键和时间间隔
             if self.shift_pressed and self.f11_pressed:
-                print("检测到翻译快捷键，开始翻译...")
-                self.handle_translation()
+                if current_time - self.last_translation_time >= self.min_interval:
+                    print("检测到翻译快捷键，开始翻译...")
+                    self.handle_translation()
+                    self.last_translation_time = current_time
+                    # 重置按键状态
+                    self.shift_pressed = False
+                    self.f11_pressed = False
+                else:
+                    print("操作过于频繁，请稍后再试")
             elif self.shift_pressed and self.f12_pressed:
                 print("检测到退出快捷键，程序即将退出...")
                 import sys
