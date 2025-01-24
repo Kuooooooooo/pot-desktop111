@@ -1,81 +1,63 @@
 import win32gui
 import win32con
-import win32api
 import requests
 from pynput import keyboard
 import time
 from typing import Optional
+import json
+import os
 
-class PotTranslator:
+class Translator:
     def __init__(self):
         """初始化翻译器"""
         self.ctrl_pressed = False
         self.win_pressed = False
         self.t_pressed = False
         self.last_translation_time = 0
-        self.pot_port = 60828
-        self.pot_url = f"http://127.0.0.1:{self.pot_port}"
         
-        # 保存原始剪贴板内容
-        self.original_clipboard = self.get_clipboard_text()
-        
-        # 测试Pot连接
-        try:
-            response = requests.post(f"{self.pot_url}/translate", 
-                json={"text": "test", "from": "auto", "to": "en"},
-                timeout=5
-            )
-            if response.status_code == 200:
-                print("✓ Pot翻译服务已连接")
-            else:
-                print(f"✗ Pot服务响应异常: {response.status_code}")
-        except Exception as e:
-            print("✗ 连接Pot失败:", e)
-            print("请确保Pot程序已启动")
-        print("初始化完成，等待快捷键触发...")
+        # 加载配置
+        self.config = self.load_config()
+        if not self.config:
+            print("请先配置翻译API密钥")
+            return
+            
+        print("✓ 翻译器初始化完成")
+        print("等待快捷键触发 (Ctrl+Win+T)...")
 
-    def get_clipboard_text(self) -> str:
-        """获取剪贴板文本"""
+    def load_config(self) -> dict:
+        """加载配置文件"""
         try:
-            win32clipboard.OpenClipboard()
-            try:
-                return win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
-            except:
-                return ""
-            finally:
-                win32clipboard.CloseClipboard()
-        except:
-            return ""
-
-    def set_clipboard_text(self, text: str):
-        """设置剪贴板文本"""
-        try:
-            win32clipboard.OpenClipboard()
-            win32clipboard.EmptyClipboard()
-            win32clipboard.SetClipboardText(text, win32con.CF_UNICODETEXT)
-            win32clipboard.CloseClipboard()
+            config_path = "translator_config.json"
+            if not os.path.exists(config_path):
+                # 创建默认配置
+                config = {
+                    "api_type": "deepl",  # deepl, google, microsoft
+                    "api_key": "",  # 需要填写API密钥
+                    "source_lang": "auto",
+                    "target_lang": "EN",
+                }
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(config, f, indent=4, ensure_ascii=False)
+                print(f"已创建配置文件模板: {config_path}")
+                print("请填写API密钥后重启程序")
+                return None
+                
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
         except Exception as e:
-            print(f"设置剪贴板错误: {e}")
+            print(f"加载配置失败: {e}")
+            return None
 
     def get_window_text(self, hwnd) -> str:
         """获取窗口文本"""
         try:
-            # 获取文本长度
             length = win32gui.SendMessage(hwnd, win32con.WM_GETTEXTLENGTH, 0, 0)
             if length == 0:
                 return ""
-                
-            # 分配缓冲区
             buffer = win32gui.PyMakeBuffer(length + 1)
-            
-            # 获取文本
             win32gui.SendMessage(hwnd, win32con.WM_GETTEXT, length + 1, buffer)
-            
-            # 转换为字符串
             text = buffer[:length].tobytes().decode('utf-16')
-            print(f"获取到文本: {text}")
             return text
-            
         except Exception as e:
             print(f"获取文本错误: {e}")
             return ""
@@ -83,7 +65,6 @@ class PotTranslator:
     def set_window_text(self, hwnd, text: str) -> bool:
         """设置窗口文本"""
         try:
-            # 直接发送文本设置消息
             result = win32gui.SendMessage(hwnd, win32con.WM_SETTEXT, 0, text)
             return result != 0
         except Exception as e:
@@ -91,29 +72,32 @@ class PotTranslator:
             return False
 
     def translate_text(self, text: str) -> Optional[str]:
-        """使用翻译API"""
-        try:
-            # 这里可以选择：
-            # 1. Google Translate API
-            # 2. DeepL API
-            # 3. Microsoft Translator API
-            # 具体使用哪个API，我们可以根据您的需求来选择
+        """翻译文本"""
+        if not text.strip():
+            return None
             
-            # 示例：使用DeepL API
-            response = requests.post(
-                "https://api-free.deepl.com/v2/translate",
-                headers={"Authorization": f"DeepL-Auth-Key {self.api_key}"},
-                data={
-                    "text": text,
-                    "source_lang": "auto",
-                    "target_lang": "EN"
-                }
+        try:
+            # 使用Google Translate API
+            response = requests.get(
+                "https://translate.googleapis.com/translate_a/single",
+                params={
+                    "client": "gtx",
+                    "sl": self.config["source_lang"],
+                    "tl": self.config["target_lang"],
+                    "dt": "t",
+                    "q": text
+                },
+                timeout=5
             )
             
             if response.status_code == 200:
                 result = response.json()
-                return result["translations"][0]["text"]
-            
+                translated = ''.join([item[0] for item in result[0] if item[0]])
+                return translated
+            else:
+                print(f"翻译请求失败: {response.status_code}")
+                print(f"错误信息: {response.text}")
+                
             return None
         except Exception as e:
             print(f"翻译错误: {e}")
@@ -127,7 +111,7 @@ class PotTranslator:
         self.last_translation_time = current_time
 
         try:
-            # 获取当前窗口句柄
+            # 获取当前窗口
             hwnd = win32gui.GetForegroundWindow()
             window_title = win32gui.GetWindowText(hwnd)
             print(f"\n当前窗口: {window_title}")
@@ -188,14 +172,16 @@ class PotTranslator:
 
     def run(self):
         """运行翻译器"""
-        print("Silent Translator is running... Press Ctrl+Win+T to translate")
+        if not self.config:
+            return
+            
         with keyboard.Listener(
             on_press=self.on_press,
             on_release=self.on_release) as listener:
             listener.join()
 
 def main():
-    translator = PotTranslator()
+    translator = Translator()
     translator.run()
 
 if __name__ == "__main__":
