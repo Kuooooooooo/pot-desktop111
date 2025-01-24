@@ -121,7 +121,7 @@ pub fn config_window() {
     window.center().unwrap();
 }
 
-fn translate_window() -> Window {
+pub fn translate_window() -> Window {
     use mouse_position::mouse_position::{Mouse, Position};
     // Mouse physical position
     let mut mouse_position = match Mouse::get_mouse_position() {
@@ -250,38 +250,99 @@ pub async fn text_translate(text: String) -> String {
 pub async fn translate_and_replace() {
     let app_handle = APP.get().unwrap();
     
-    // 保存原始剪贴板内容
-    let original_clipboard = app_handle.clipboard_manager().read_text().unwrap_or_default();
+    info!("Starting translate_and_replace");
     
-    // 模拟 Ctrl+A 和 Ctrl+C 获取当前文本
-    simulate_paste("");
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    // 先全选当前文本
+    simulate_select_all();
+    std::thread::sleep(std::time::Duration::from_millis(200));
     
-    // 获取复制的文本
+    // 复制选中的文本
+    simulate_copy();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    
+    // 获取当前文本并翻译
     if let Some(text) = app_handle.clipboard_manager().read_text().unwrap_or_default() {
-        // 翻译文本
-        let translated = text_translate(text).await;
+        info!("Got text from clipboard: {}", text);
         
-        // 将翻译结果写入剪贴板
-        if let Err(e) = app_handle.clipboard_manager().write_text(translated) {
-            warn!("Failed to write to clipboard: {}", e);
-            return;
+        // 将文本写入状态并触发翻译
+        let state: tauri::State<StringWrapper> = app_handle.state();
+        state.0.lock().unwrap().replace_range(.., &text);
+        
+        let window = translate_window();
+        window.show().unwrap();
+        window.emit("new_text", &text).unwrap();
+        
+        // 等待翻译完成
+        std::thread::sleep(std::time::Duration::from_millis(3000));
+        
+        // 获取翻译结果
+        let translated = {
+            let state = app_handle.state::<StringWrapper>();
+            let guard = state.0.lock().unwrap();
+            if guard.as_str() == text {
+                info!("Translation not ready, waiting...");
+                std::thread::sleep(std::time::Duration::from_millis(2000));
+            }
+            guard.clone()
+        };
+        
+        info!("Translated text: {}", translated);
+        
+        if translated != text {
+            // 将翻译结果写入剪贴板
+            if let Err(e) = app_handle.clipboard_manager().write_text(&translated) {
+                warn!("Failed to write to clipboard: {}", e);
+                return;
+            }
+            
+            // 再次全选原文
+            simulate_select_all();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            
+            // 粘贴翻译结果
+            simulate_paste("");
+            
+            info!("Translation completed and replaced");
+        } else {
+            warn!("Translation not completed or unchanged");
         }
-        
-        // 等待一小段时间确保剪贴板内容已更新
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        
-        // 模拟粘贴操作
-        simulate_paste("");
+    } else {
+        warn!("No text found in clipboard");
     }
-    
-    // 等待一小段时间确保操作完成
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    
-    // 恢复原始剪贴板内容
-    if let Some(original) = original_clipboard {
-        if let Err(e) = app_handle.clipboard_manager().write_text(original) {
-            warn!("Failed to restore clipboard: {}", e);
+}
+
+// 新增：复制操作
+fn simulate_copy() {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::Input::KeyboardAndMouse::*;
+        use std::thread;
+        use std::time::Duration;
+
+        unsafe {
+            keybd_event(VK_CONTROL.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
+            keybd_event(b'C', 0, KEYBD_EVENT_FLAGS(0), 0);
+            thread::sleep(Duration::from_millis(50));
+            keybd_event(b'C', 0, KEYBD_EVENT_FLAGS(2), 0);
+            keybd_event(VK_CONTROL.0 as u8, 0, KEYBD_EVENT_FLAGS(2), 0);
+        }
+    }
+}
+
+// 新增：仅执行全选操作
+fn simulate_select_all() {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::Input::KeyboardAndMouse::*;
+        use std::thread;
+        use std::time::Duration;
+
+        unsafe {
+            keybd_event(VK_CONTROL.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
+            keybd_event(b'A', 0, KEYBD_EVENT_FLAGS(0), 0);
+            thread::sleep(Duration::from_millis(50));
+            keybd_event(b'A', 0, KEYBD_EVENT_FLAGS(2), 0);
+            keybd_event(VK_CONTROL.0 as u8, 0, KEYBD_EVENT_FLAGS(2), 0);
         }
     }
 }

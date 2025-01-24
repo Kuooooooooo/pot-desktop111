@@ -22,7 +22,7 @@ use cmd::*;
 use config::*;
 use hotkey::*;
 use lang_detect::*;
-use log::info;
+use log::{info, warn};
 use once_cell::sync::OnceCell;
 use screenshot::screenshot;
 use server::*;
@@ -37,8 +37,7 @@ use updater::check_update;
 use window::config_window;
 use window::updater_window;
 use tauri::GlobalShortcutManager;
-use window::text_translate;
-use window::translate_and_replace;
+use window::{translate_and_replace, translate_window};
 
 // Global AppHandle
 pub static APP: OnceCell<tauri::AppHandle> = OnceCell::new();
@@ -95,14 +94,16 @@ fn main() {
             // Start http server
             start_server();
             // Register Global Shortcut
-            match register_shortcut("all") {
-                Ok(()) => {}
-                Err(e) => Notification::new(app.config().tauri.bundle.identifier.clone())
-                    .title("Failed to register global shortcut")
-                    .body(&e)
-                    .icon("pot")
-                    .show()
-                    .unwrap(),
+            info!("Registering shortcut: CommandOrControl+Alt+T");
+            let app_handle = app.handle();
+            let handle = app_handle.clone();
+            if let Err(e) = app.global_shortcut_manager().register("CommandOrControl+Alt+T", move || {
+                let handle = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    translate_and_replace().await;
+                });
+            }) {
+                warn!("Failed to register shortcut: {}", e);
             }
             match get("proxy_enable") {
                 Some(v) => {
@@ -130,16 +131,6 @@ fn main() {
                 clipboard_monitor.to_string(),
             )));
             start_clipboard_monitor(app.handle());
-            // 注册默认翻译快捷键
-            if let Err(e) = app.global_shortcut_manager().register("CommandOrControl+Alt+T", move || {
-                if let Ok(text) = get_selected_text() {
-                    if !text.is_empty() {
-                        text_translate(text);
-                    }
-                }
-            }) {
-                info!("Failed to register translate shortcut: {}", e);
-            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
